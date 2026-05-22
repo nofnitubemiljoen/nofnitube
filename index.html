@@ -1,1 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NofniTube</title>
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#1e1e1e;
+color:white;
+overflow-x:hidden;
+}
 
+header{
+position:sticky;
+top:0;
+display:flex;
+gap:10px;
+padding:12px;
+background:#111;
+z-index:100;
+border-bottom:2px solid red;
+}
+
+button{
+background:#2a2a2a;
+color:white;
+border:2px solid red;
+padding:10px;
+cursor:pointer;
+}
+
+button:hover{
+background:red;
+}
+
+.page{
+display:none;
+padding:15px;
+}
+
+.active{
+display:block;
+}
+
+.videoCard{
+background:#2b2b2b;
+padding:10px;
+margin-bottom:20px;
+border:2px solid #444;
+}
+
+video{
+width:100%;
+max-height:500px;
+background:black;
+}
+
+.shortVideo{
+width:320px;
+height:570px;
+object-fit:cover;
+}
+
+input, textarea, select{
+width:100%;
+padding:10px;
+margin-top:10px;
+background:#2a2a2a;
+color:white;
+border:2px solid #555;
+}
+
+.comment{
+background:#333;
+padding:10px;
+margin-top:10px;
+}
+
+.badge{
+color:cyan;
+font-size:12px;
+margin-left:5px;
+}
+
+.graphBar{
+height:20px;
+background:red;
+margin-top:5px;
+}
+</style>
+</head>
+<body>
+
+<header>
+<button onclick="showPage('home')">Home</button>
+<button onclick="showPage('shorts')">Shorts</button>
+<button onclick="showPage('upload')">Upload</button>
+<button onclick="showPage('studio')">Studio</button>
+<button onclick="showPage('settings')">Settings</button>
+</header>
+
+<div id="home" class="page active"></div>
+<div id="shorts" class="page"></div>
+
+<div id="upload" class="page">
+<h2>Upload Video</h2>
+<input id="videoName" placeholder="Video title">
+<input id="videoTags" placeholder="Tags (optional)">
+<select id="videoType">
+<option value="long">Long-form</option>
+<option value="short">Short</option>
+</select>
+<input type="file" id="videoFile" accept="video/*">
+<button onclick="uploadVideo()">Upload</button>
+<p id="uploadStatus"></p>
+</div>
+
+<div id="studio" class="page">
+<h2>Studio</h2>
+<div id="analytics"></div>
+</div>
+
+<div id="settings" class="page">
+<h2>Settings</h2>
+<input id="usernameInput" placeholder="Username">
+<button onclick="switchAccount()">Switch Account</button>
+<p id="currentUser"></p>
+</div>
+
+<script>
+const WEBHOOK = "YOUR_WEBHOOK_URL";
+
+let currentUser = localStorage.getItem("nofniUser") || "Guest" + Math.floor(Math.random()*9999);
+localStorage.setItem("nofniUser", currentUser);
+
+document.getElementById("currentUser").innerText = "Current account: " + currentUser;
+
+let videos = JSON.parse(localStorage.getItem("nofniVideos") || "[]");
+let subscriptions = JSON.parse(localStorage.getItem("nofniSubs") || "{}");
+let ratings = JSON.parse(localStorage.getItem("nofniRatings") || "{}");
+
+function saveAll(){
+localStorage.setItem("nofniVideos", JSON.stringify(videos));
+localStorage.setItem("nofniSubs", JSON.stringify(subscriptions));
+localStorage.setItem("nofniRatings", JSON.stringify(ratings));
+}
+
+function showPage(id){
+document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+document.getElementById(id).classList.add('active');
+render();
+}
+
+function switchAccount(){
+const name = document.getElementById("usernameInput").value.trim();
+if(!name) return;
+currentUser = name;
+localStorage.setItem("nofniUser", currentUser);
+document.getElementById("currentUser").innerText = "Current account: " + currentUser;
+render();
+}
+
+async function uploadVideo(){
+const file = document.getElementById("videoFile").files[0];
+const title = document.getElementById("videoName").value;
+const tags = document.getElementById("videoTags").value;
+const type = document.getElementById("videoType").value;
+
+if(!file) return;
+
+const status = document.getElementById("uploadStatus");
+status.innerText = "Uploading...";
+
+const form = new FormData();
+form.append("file", file);
+
+const res = await fetch(WEBHOOK, {
+method:"POST",
+body:form
+});
+
+const data = await res.json();
+const url = data.attachments[0].url;
+
+videos.unshift({
+id:Date.now(),
+title,
+tags,
+type,
+url,
+uploader:currentUser,
+views:0,
+comments:[],
+ratings:[],
+subscribers:0
+});
+
+saveAll();
+status.innerText = "Uploaded!";
+render();
+}
+
+function verifiedBadge(user){
+const subs = Object.values(subscriptions).filter(x=>x===user).length;
+if(subs >= 10){
+return '<span class="badge">✔ VERIFIED</span>';
+}
+return '';
+}
+
+function subscribe(user){
+subscriptions[currentUser+user] = user;
+saveAll();
+render();
+}
+
+function rateVideo(id, score){
+if(ratings[currentUser+id]) return alert("Already rated");
+ratings[currentUser+id] = score;
+
+const vid = videos.find(v=>v.id===id);
+vid.ratings.push(score);
+
+saveAll();
+render();
+}
+
+function addComment(id){
+const input = document.getElementById('comment'+id);
+const text = input.value;
+if(!text) return;
+
+const vid = videos.find(v=>v.id===id);
+vid.comments.push({
+user:currentUser,
+text
+});
+
+saveAll();
+render();
+}
+
+function average(arr){
+if(arr.length===0) return 0;
+return (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1);
+}
+
+function recommendationScore(v){
+let score = v.views;
+score += v.ratings.reduce((a,b)=>a+b,0);
+
+if(v.uploader===currentUser) score += 5;
+
+return score;
+}
+
+function render(){
+const home = document.getElementById('home');
+const shorts = document.getElementById('shorts');
+const analytics = document.getElementById('analytics');
+
+home.innerHTML = '';
+shorts.innerHTML = '';
+analytics.innerHTML = '';
+
+const sorted = [...videos].sort((a,b)=>recommendationScore(b)-recommendationScore(a));
+
+sorted.filter(v=>v.type==='long').forEach(v=>{
+const div = document.createElement('div');
+div.className = 'videoCard';
+
+v.views++;
+
+div.innerHTML = `
+<h3>${v.title}</h3>
+<p>${v.uploader} ${verifiedBadge(v.uploader)}</p>
+<video controls src="${v.url}"></video>
+<p>Views: ${v.views}</p>
+<p>Average rating: ${average(v.ratings)}</p>
+<button onclick="subscribe('${v.uploader}')">Subscribe</button>
+<div>
+${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button onclick="rateVideo(${v.id},${n})">${n}</button>`).join('')}
+</div>
+<input id="comment${v.id}" placeholder="Comment">
+<button onclick="addComment(${v.id})">Send</button>
+<div>
+${v.comments.map(c=>`
+<div class='comment'>
+<b>${c.user} ${verifiedBadge(c.user)}</b><br>
+${c.text}
+</div>
+`).join('')}
+</div>
+`;
+
+home.appendChild(div);
+});
+
+sorted.filter(v=>v.type==='short').forEach(v=>{
+const div = document.createElement('div');
+div.className = 'videoCard';
+div.style.display='flex';
+div.style.justifyContent='center';
+
+v.views++;
+
+div.innerHTML = `
+<div>
+<h3>${v.title}</h3>
+<p>${v.uploader} ${verifiedBadge(v.uploader)}</p>
+<video class="shortVideo" controls src="${v.url}"></video>
+</div>
+`;
+
+shorts.appendChild(div);
+});
+
+const myVideos = videos.filter(v=>v.uploader===currentUser);
+
+analytics.innerHTML += `<h3>Your videos: ${myVideos.length}</h3>`;
+
+myVideos.forEach(v=>{
+analytics.innerHTML += `
+<div class="videoCard">
+<b>${v.title}</b>
+<p>Views: ${v.views}</p>
+<p>Average Rating: ${average(v.ratings)}</p>
+<div class="graphBar" style="width:${Math.min(v.views,100)}%"></div>
+</div>
+`;
+});
+}
+
+render();
+</script>
+
+</body>
+</html>
